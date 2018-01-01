@@ -1,14 +1,13 @@
 package bigchaindb
 
 import (
-	"math/random"
-	"github.com/hidaruma/bigchaindb-go/bigchaindb/exceptions"
 	"github.com/hidaruma/bigchaindb-go/bigchaindb/common"
-	"github.com/hidaruma/bigchaindb-go/bigchaindb/common/utils"
 	"github.com/hidaruma/bigchaindb-go/bigchaindb/backend"
-	"github.com/hidaruma/bigchaindb-go/bigchaindb/config_utils"
-	"github.com/hidaruma/bigchaindb-go/bigchaindb/consensus"
-	"github.com/hidaruma/bigchaindb-go/bigchaindb/models"
+	"time"
+	"log"
+	"encoding/json"
+	"go/constant"
+	"github.com/onsi/ginkgo/integration/_fixtures/watch_fixtures/B"
 )
 
 const (
@@ -17,9 +16,36 @@ const (
 	BlockUndecided string = "undecided"
 	TxInBacklog string = "backlog"
 )
+type Element map[string]interface{}
+
+type Config map[string][string]interface{}
+
+type Keyring []string
 
 type Bigchain struct {
-	
+	Me string
+	MePrivate string
+	NodesExceptMe Keyring
+	BacklogReassignDelay string
+	Consensus BaseConsensusRules
+	Connection *backend.Connection
+	Statusd string
+}
+
+func (bc *Bigchain) BLOCKINVALID() string {
+	return "invalid"
+}
+
+func (bc *Bigchain) BLOCKVALID() string {
+	return "valid"
+}
+
+func (bc *Bigchain) BLOCKUNDECIDED() string {
+	return "undecided"
+}
+
+func (bc *Bigchain) TXUNDECIDED() string {
+	return "undecided"
 }
 
 /*
@@ -39,13 +65,49 @@ keyring (list[str]): list of base58 encoded public keys of the federation nodes.
 connection (:class:`~bigchaindb.backend.connection.Connection`):
 A connection to the database.
 */
-func NewBigchain() *Bigchain {
-	bigchain := &Bigchain
-	
-	return bigchain
+func (bc *Bigchain) init(publicKey string, privateKey string, keyring []string, connection *backend.Connection, backlogReassignDelay string) {
+	var config *Config
+	config = Autoconfigure()
+	if publicKey != nil {
+		bc.Me = publicKey
+	} else {
+		bc.Me = config["keypair"]["public"]
+	}
+	if privateKey != nil {
+		bc.MePrivate = privateKey
+	} else {
+		bc.MePrivate = config["keypair"]["private"]
+	}
+	if keyring != nil {
+		bc.NodesExceptMe = keyring
+	} else {
+		bc.NodesExceptMe = config["keyring"]
+	}
+	if backlogReassignDelay == nil {
+		backlogReassignDelay = config["backlog_reassign_delay"]
+	}
+	bc.BacklogReassignDelay = backlogReassignDelay
+
+	var consensusPlugin Plugin
+	consensusPlugin = config["consensus_plugin"]
+
+	if consensusPlugin != nil {
+		bc.Consensus = LoadConsensusPlugins(consensusPlugin)
+	} else {
+		bc.Consensus = BaseConsensusRules{}
+	}
+
+	if connection != nil {
+		bc.Connection = connection
+	} else {
+		bc.Connection = backend.Connect(config["database"])
+	}
 }
-
-
+func (bc *Bigchain) Federation() []string {
+	var keys []string
+	keys = append(bc.NodesExceptMe, bc.Me)
+	return keys
+}
 /*
 Write the transaction to bigchain.
 When first writing a transaction to the bigchain the transaction will be kept in a backlog until
@@ -55,8 +117,15 @@ signed_transaction (Transaction): transaction with the `signature` included.
 Returns:
 dict: database response
 */
-func (bc *Blockchain) WriteTransaction(signedTransaction ) {
-	
+func (bc *Bigchain) WriteTransaction(signedTransaction *Transaction) {
+	signedTransaction = signedTransaction.ToDict()
+	var assignee string
+	if bc.NodesExceptMe != nil {
+		assignee = RandomChoiceString(bc.NodesExceptMe)
+	} else {
+		assignee = bc.Me
+	}
+	return backend.Query.WriteTransaction(bc.Connection, signedTransaction)
 }
 
 /*
@@ -66,8 +135,17 @@ transaction (dict): assigned transaction
 Returns:
 dict: database response or None if no reassignment is possible
 */
-func (bc *Blockchain) ReassignTransaction(transaction ) {
-	
+func (bc *Bigchain) ReassignTransaction(transaction *Transaction) {
+	var otherNodes []*Transaction
+	var newAssignee string
+	otherNodes = bc.Federation.Difference([transaction["assignee"]])
+	if otherNodes != nil {
+		newAssignee = RandomChoiceString(otherNodes)
+	} else {
+		newAssignee = bc.Me
+	}
+	return backend.Query.UpdateTransaction(bc.Connection, transaction["id"],
+		{"assignee": newAssignee, "assignment_timestamp": time.Now()})
 }
 
 /*
@@ -77,8 +155,8 @@ Args:
 Returns:
 The database response.
 */
-func (bc *Blockchain) DeleteTransaction(transactionID ) {
-	
+func (bc *Bigchain) DeleteTransaction(transactionID string) {
+	return backend.Query.DeleteTransaction(bc.Connection, transactionID)
 }
 
 /*
@@ -86,8 +164,8 @@ Get a cursor of stale transactions.
 Transactions are considered stale if they have been assigned a node, but are still in the
 backlog after some amount of time specified in the configuration
 */
-func (bc *Blockchain) GetStaleTransactions() {
-	
+func (bc *Bigchain) GetStaleTransactions() {
+	return backend.Query.GetStaleTransaction(bc.Connection, bc.BacklogReassignDelay)
 }
 
 /*
@@ -98,8 +176,8 @@ Returns:
 The transaction if the transaction is valid else it raises an
 exception describing the reason why the transaction is invalid.
 */
-func (bc *Blockchain) ValidateTransaction(transaction) {
-	
+func (bc *Bigchain) ValidateTransaction(transaction *Transaction) bool {
+	return bc.Consensus.ValidateTransaction(transaction)
 }
 
 
@@ -110,8 +188,16 @@ Args:
 txid (str): Transaction ID
 exclude_block_id (str): Exclude block from search
 */
-func (bc *Blockchain) IsNewTransaction(txID, excludeBlockID) {
-	
+func (bc *Bigchain) IsNewTransaction(txID string, excludeBlockID string)  bool {
+	var blockStatuses []string
+	blockStatuses = bc.GetBlocksStatusContainingTx(txID)
+	delete(blockStatuses, excludeBlockID)
+	for _, status := range blockStatuses {
+		if status != bc.BLOCKINVALID() {
+			return false
+		}
+	}
+	return true
 }
 
 /*
@@ -123,8 +209,29 @@ block_id (str): transaction id of the transaction to get
 include_status (bool): also return the status of the block
 the return value is then a tuple: (block, status)
 */
-func (bc *Blockchain) GetBlock(blockID, includeStatus) {
-	
+func (bc *Bigchain) GetBlock(blockID string, includeStatus bool) (map[string]Block, string){
+	var blockDict map[string]Block
+	blockDict = backend.Query.GetBlock(bc.Connection, blockID)
+	if blockDict != nil {
+		var assetIDs []string
+		assetIDs = Block.GetAssetIDs(blockDict)
+		var txnIDs []string
+		txnIDs = Block.GetTxnIDs(blockDict)
+		var assets []Asset
+		assets = bc.GetAssets(assetIDs)
+		var metadata Metadata
+		metadata = bc.GetMetadata(txnIDs)
+		blockDict = Block.CoupleAssets(blockDict, assets)
+		blockDict = Block.CoupleMetadata(blockDict, metadata)
+
+	}
+	var status string
+	if includeStatus {
+		status = bc.BlockElectionStatus(blockDict)
+		return blockDict, status
+	} else {
+		return blockDict, ""
+	}
 }
 
 
@@ -148,8 +255,50 @@ otherwise ``None``.
 If :attr:`include_status` is ``True``, also returns the
 transaction's status if the transaction was found.
 */
-func (bc *Blockchain) getTransaction(txID, includeStatus) {
-	
+func (bc *Bigchain) GetTransaction(txID string, includeStatus bool) (*Transaction, string) {
+	var response *Transaction
+	var txStatus string
+	var blocksValidityStatus map[string]string
+	blocksValidityStatus = bc.GetBlocksStatusContainingTx(txID)
+	var checkBacklog bool
+	checkBacklog = trus
+
+	if blocksValidityStatus != nil {
+		for id, status := range blocksValidityStatus {
+			if status != Bigchain.BLOCKINVALID() {
+				blocksValidityStatus[id] = status
+			}
+		}
+		if blocksValidityStatus != nil {
+			checkBacklog = false
+
+			for targetBlockID, _ := range blocksValidityStatus {
+				if blocksValidityStatus[targetBlockID] == Bigchain.BLOCKVALID() {
+					txStatus = bc.TXVALID
+					break
+				}
+
+			}
+		}
+	}
+	if checkBacklog {
+		response = backend.Query.GetTransactionFromBacklog(bc.Connection, txID)
+		if response != nil {
+			txStatus = bc.TXINBACKLOG()
+		}
+	}
+	if response != nil {
+		if txStatus == bc.TXINBACKLOG() {
+			response = Transaction.FromDict(response)
+		} else {
+			response = Transaction.FromDB(bc, response)
+		}
+	}
+	if includeStatus {
+		return response, txStatus
+	} else {
+		return response, nil
+	}
 }
 
 /*
@@ -161,8 +310,12 @@ Returns:
 or 'backlog'). If no transaction with that `txid` was found it
 returns `None`
 */
-func (bc *Blockchain) getStatus(txID string) {
-	
+func (bc *Bigchain) getStatus(txID string) string {
+	var status string
+	var includeStatus bool
+	includeStatus = true
+	_, status = bc.GetTransaction(txID, includeStatus)
+	return status
 }
 
 /*
@@ -174,8 +327,34 @@ Returns:
 A dict of blocks containing the transaction,
 e.g. {block_id_1: 'valid', block_id_2: 'invalid' ...}, or None
 */
-func (bc *Blockchain) GetBlocksStatusContainingTx() {
-	
+func (bc *Bigchain) GetBlocksStatusContainingTx(txID string) map[int]string {
+	var blocks []*Block
+	blocks = backend.Query.GetBlocksStatusFromTransaction(bc.Connection, txID)
+
+	if len(blocks) > 0 {
+		var blocksValidityStatus map[int]string
+		for _, block := range blocks {
+			blocksValidityStatus[block.ID] = bc.BlockElectionStatus(block)
+		}
+		var validBlocksConter int
+		for _, validity := range blocksValidityStatus {
+			if validity == Bigchain.BLOCKVALID() {
+				validBlocksConter++
+			}
+		}
+		var blockIDs []string
+		if validBlocksConter > 1 {
+			for blockID, _ := range blocksValidityStatus {
+				if blocksValidityStatus[blockID] == Bigchain.BLOCKVALID() {
+					blockIDs = append(blockIDs, blockID)
+				}
+			}
+			log.Println("%v, %v", txID, blockIDs)
+		}
+		return blocksValidityStatus
+	} else {
+		return nil
+	}
 }
 
 /*
@@ -185,8 +364,13 @@ asset_id (str): The asset id.
 Returns:
 dict if the asset exists else None.
 */
-func (bc *Blockchain) GetAssetByID(assetID string) {
-	
+func (bc *Bigchain) GetAssetByID(assetID string) *common.Asset {
+	var cursor map[int]*common.Asset
+	cursor = backend.Query.GetAssetByID(bc.Connection, assetID)
+	if cursor != nil {
+		return cursor[0]["asset"]
+	}
+	return nil
 }
 
 
@@ -207,8 +391,34 @@ Raises:
 CriticalDoubleSpend: If the given `(txid, output)` was spent in
 more than one valid transaction.
 */
-func (bc *Blockchain) GetSpent(txID string, output int) {
-	
+func (bc *Bigchain) GetSpent(txID string, output int) *Transaction {
+	var transactions []*Transaction
+	transactions = backend.Query.GetSpent(bc.Connection, txID, output)
+	var numValidTransactions int
+	numValidTransactions = 0
+	var nonInvalidTransactions []*Transaction
+	for _, transaction := range transactions {
+		var txn *Transaction
+		var status string
+		var includeStatus bool
+		includeStatus = true
+		txn, status = bc.GetTransaction(transaction["id"],includeStatus)
+		if status == bc.TXVALID {
+			numValidTransactions++
+		}
+		if numValidTransactions > 1 {
+			log.Println(CriticalDoubleSpend(""))
+		}
+		if status != "" {
+			transaction.Update({"metadata": txn.Metadata})
+			nonInvalidTransactions = append(nonInvalidTransactions, transaction)
+		}
+	}
+	if len(nonInvalidTransactions) > 0 {
+		return Transaction.FromDict(nonInvalidTransactions[0])
+	} else {
+		return nil
+	}
 }
 
 /*
@@ -219,12 +429,14 @@ Returns:
 :obj:`list` of TransactionLink: list of ``txid`` s and ``output`` s
 pointing to another transaction's condition
 */
-func (bc *Blockchain) GetOwnedIDs(owner string) {
-	
+func (bc *Bigchain) GetOwnedIDs(owner string) []*common.TransactionLink {
+	var spent bool
+	spent = false
+	return bc.GetOutputsFiltered(owner, spent)
 }
 
-func (bc *Blockchain) Fastquery() {
-	
+func (bc *Bigchain) Fastquery() {
+	return Fastquery(bc.Connection, bc.Me)
 }
 
 
@@ -240,15 +452,34 @@ Returns:
 pointing to another transaction's condition
 */
 
-func (bc *Blockchain) GetOutputsfiltered(owner string, spent) {
-	
+func (bc *Bigchain) GetOutputsFiltered(owner string, spent bool) []*common.TransactionLink {
+	var outputs []*common.TransactionLink{}
+	outputs = bc.Fastquery.GetOutputsByPublicKey(owner)
+	switch spent {
+	case nil:
+		return outputs
+	case true:
+		return bc.Fastquery.FilterUnspentOutputs(outputs)
+	case false:
+		return bc.Fastquery.FilterSpentOutputs(outputs)
+	}
+
 }
 
 /*
 Get a list of transactions filtered on some criteria
 */
-func (bc *Blockchain) GetTransactionsFiltered(assetID , operation) {
-	
+func (bc *Bigchain) GetTransactionsFiltered(assetID string, operation string) []*Transaction {
+	var txIDs []string
+	txIDs = backend.Query.GetTxIDsFiltered(bc.Connection, assetID, operation)
+	var txs []*Transaction{}
+	for _, txID := range txIDs {
+		tx, status := bc.GetTransaction(txID, true)
+		if status == bc.TXVALID() {
+			txs = append(txs, tx)
+		}
+	}
+	return txs
 }
 
 /*
@@ -261,15 +492,21 @@ validated_transactions (list(Transaction)): list of validated
 Returns:
 Block: created block.
 */
-func (bc *Blockchain) CreateBlock(validatedTransactions) {
-	if validatedTransactions != nil {
-		return exceptions.OperationError()
+func (bc *Bigchain) CreateBlock(validatedTransactions []*Transaction) *Block {
+	if len(validatedTransactions) > 0 {
+		log.Println(OperationError())
 	}
-
+	var id int
 	var voters []string
-	voters = federation
-	block := 
-
+	voters = bc.Federation()
+	block := *Block{
+					id,
+					validatedTransactions,
+					bc.Me,
+					GenTimestamp(),
+					voters,
+					}
+	block.Sign(bc.MePrivate)
 	return block
 }
 
@@ -281,8 +518,8 @@ Returns:
 The block if the block is valid else it raises and exception
 describing the reason why the block is invalid.
 */
-func (bc *Blockchain) ValidateBlock(block ) {
-	
+func (bc *Bigchain) ValidateBlock(block *Block) bool {
+	return bc.Consensus.ValidateBlock(bc, block)
 }
 
 /*
@@ -293,8 +530,18 @@ Returns:
 bool: :const:`True` if this block already has a
 valid vote from this node, :const:`False` otherwise.
 */
-func (bc *Blockchain) HasPreviousVote(blockID string) bool {
-	
+func (bc *Bigchain) HasPreviousVote(blockID string) bool {
+	var votes []Vote
+	var el []Vote
+	var keys []string
+	keys = append(keys, bc.Me)
+	votes = backend.Query.GetVotesByBlocksIDAndVoter(bc.Connection, blockID, bc.Me)
+	el, _ = bc.Consensus.Voting.PartitionEligibleVotes(votes, keys)
+	if len(el) > 0 {
+		return true
+	} else {
+		return false
+	}
 }
 
 /*
@@ -302,15 +549,34 @@ func (bc *Blockchain) HasPreviousVote(blockID string) bool {
 Args:
 block (Block): block to write to bigchain.
 */
-func (bc *Blockchain) WriteBlock(block) {
-	
+func (bc *Bigchain) WriteBlock(block *Block) {
+	var assets []*common.Asset
+	var blockDict map[string]*Block{}
+	var metadatas []*common.Metadata
+	assets, blockDict = block.DecoupleAssets()
+	metadatas, blockDict = block.decoupleMetadata(blockDict)
+	if len(assets) > 0 {
+		bc.WriteAssets(assets)
+	}
+	if len(metadatas) > 0 {
+		bc.WriteMetadata(metadatas)
+	}
+	return backend.Query.WriteBlock(bc.Connection, blockDict)
 }
 
 /*
 Prepare a genesis block.
 */
-func (bc *Blockchain) PrepareGenesisBlock() Block {
-	
+func (bc *Bigchain) PrepareGenesisBlock() *Block {
+	var blocksCount int
+	blocksCount = backend.Query.CountBlocks(bc.Connection)
+
+	if blocksCount > 0 {
+		log.Println(common.GenesisBlockAlreadyExistsError("Cannot create the Genesis block"))
+	}
+	var block *Block
+	block = bc.PrepareGenesisBlock()
+	bc.WriteBlock(block)
 }
 
 /*
@@ -319,13 +585,12 @@ Block created when bigchain is first initialized. This method is not atomic, the
 problems if multiple instances try to write the genesis block when the BigchainDB Federation is started,
 but it's a highly unlikely scenario.
 */
-func (bc *Blockchain) CreateGenesisBlock() Block {
+func (bc *Bigchain) CreateGenesisBlock() *Block {
 	var blocksCount int
 
 	blocksCount = backend.Query.CountBlocks(bc.connection)
 	if blocksCount != nil {
-		var err error
-		err = exceptions.GenesisBlockAlreadyExistsError("Cannnot create the Genesis block")
+		log.Println(GenesisBlockAlreadyExistsError("Cannnot create the Genesis block"))
 		return nil
 	}
 	block := bc.PrepareGenesisBlock()
@@ -341,31 +606,28 @@ previous_block_id (str): The id of the previous block.
 decision (bool): Whether the block is valid or invalid.
 invalid_reason (Optional[str]): Reason the block is invalid
 */
-func (bc *Blockchain) Vote(blockID string, previousBlockID string, decision bool, invalidReason string) [string]string {
+func (bc *Bigchain) Vote(blockID string, previousBlockID string, decision bool, invalidReason string) *Vote {
 	if blockID == previousBlockID {
 		exceptions.CyclicBlockchainError()
 	}
 
-	var vote [string]string
-
-	vote = {
-			"voting_for_block": blockID,
-			"previous_block": previousBlockID,
-			"is_block_valid": decision,
-			"invalid_reason": invalidReason,
-			"timestamp": genTimestamp(),
+	var vote *Vote{
+			VotingForBlock: blockID,
+			PreviousBlockID: previousBlockID,
+			IsBlockValid: decision,
+			InvalidReason: invalidReason,
+			Timestamp: GenTimestamp(),
 			}
 	var voteData string
-	voteData := serialize(vote)
+	voteData := Serialize(vote)
 
 	var signature string
-	signature = crypto.PrivateKey(bc.mePrivate).Sign(voteData.encode())
+	signature = crypto.PrivateKey(bc.MePrivate).Sign(voteData)
 
-	var voteSigned [string]string
-	votesigned = {
-				  "node_pubkey": bc.me,
-				  "signature": sigunature.Decode()
-				  "vote": vote
+	var voteSigned *Vote{
+				  NodePubkey: bc.Me,
+				  Signature: sigunature.Decode()
+				  Vote: vote
 				 }
 	return voteSigned
 }
@@ -373,31 +635,37 @@ func (bc *Blockchain) Vote(blockID string, previousBlockID string, decision bool
 /*
 Write the vote to the database.
 */
-func (bc *Blockchain) WriteVote(vote Blockchain.Vote) {
-	return 	backend.Query.WriteVote(bc.connection, vote)
+func (bc *Bigchain) WriteVote(vote *Vote) {
+	return 	backend.Query.WriteVote(bc.Connection, vote)
 }
 
 /*
 Returns the last block that this node voted on.
 */
-func (bc *Blockchain) GetLastVotedBlock() {
+func (bc *Bigchain) GetLastVotedBlock() {
 	var lastBlockID string
-	lastBlockID = backend.Query.GetLastVotedBlockID(bc.connection, bc.me)
+	lastBlockID = backend.Query.GetLastVotedBlockID(bc.Connection, bc.Me)
 
-	return Block.fromDict(bc.GetBlock(lastBlockID))
+	return Block.FromDict(bc.GetBlock(lastBlockID))
 }
 
 
-func (bc *Blockchain) BlockElection(block Block) {
-
-	
+func (bc *Bigchain) BlockElection(block *Block) {
+	switch block.(type) {
+	case map[string]interface{}:
+	default:
+		block = block.ToDict()
+	}
+	var votes []*Vote
+	votes = backend.Query.GetVotesByBlockID(bc.Connection, block.ID)
+		return bc.Consensus.VotingBlockElection(block, votes, bc.Federation())
 }
 
 /*
 Tally the votes on a block, and return the status:
 valid, invalid, or undecided.
 */
-func (bc *Blockchain) BlockElectionStatus(block Block) {
+func (bc *Bigchain) BlockElectionStatus(block *Block) {
 	return bc.BlockElection(block)["status"]
 }
 
@@ -409,8 +677,8 @@ retrieve from the database.
 Returns:
 list: The list of assets returned from the database.
 */
-func (bc *Blockchain) GetAssets(assetIDs) {
-	
+func (bc *Bigchain) GetAssets(assetIDs []string) []*common.Asset{
+	return backend.Query.GetAssets(bc.Connection, assetIDs)
 }
 
 /*
@@ -421,8 +689,8 @@ retrieve from the database.
 Returns:
 list: The list of metadata returned from the database.
 */
-func (bc *Blockchain) GetMetadata(txnIDs ) {
-	return backend.Query.GetMetadata(bc.connection, txnIDs)
+func (bc *Bigchain) GetMetadata(txnIDs []string) []*common.Metadata {
+	return backend.Query.GetMetadata(bc.Connection, txnIDs)
 }
 
 
@@ -432,8 +700,8 @@ Args:
 assets (:obj:`list` of :obj:`dict`): A list of assets to write to
 the database.
 */
-func (bc *Blockchain) WriteAssets(assets ) {
-	return backend.Query.WriteAssets(bc.connection, assets)	
+func (bc *Bigchain) WriteAssets(assets []*common.Asset) {
+	return backend.Query.WriteAssets(bc.Connection, assets)
 }
 
 /*
@@ -442,8 +710,8 @@ Args:
 metadata (:obj:`list` of :obj:`dict`): A list of metadata to write to
 the database.
 */
-func (bc *Blockchain) WriteMetadata(metadata ) {
-	return backend.Query.WriteMetadata(bc.connection, metadata)	
+func (bc *Bigchain) WriteMetadata(metadata *common.Metadata) {
+	return backend.Query.WriteMetadata(bc.Connection, metadata)
 }
 
 
@@ -455,7 +723,15 @@ limit (int, optional): Limit the number of returned documents.
 Returns:
 iter: An iterator of assets that match the text search.
 */
-func (bc *Blockchain) TextSearch(search , , limit int, table string) {
-	var objects 
-	
+func (bc *Bigchain) TextSearch(search , , limit int, table string) []interface{} {
+	var objects []interface{}
+	objects = backend.Query.TextSearch(bc.Connection, search, limit, table)
+	var validObjects []interface{}
+	for _, obj := range objects {
+		tx, status := range bc.GetTransaction(obj["id"], true)
+		if status == bc.TXVALID() {
+			validObjects = append(validObjects, obj)
+		}
+	}
+	return validObjects
 }

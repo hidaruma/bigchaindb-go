@@ -18,18 +18,46 @@ const Banner string = "" +
 "*   BigchainDB Server docs at:                                             *\n" +
 "*    https://bigchaindb.com/http-api                                       *\n" +
 "*                                                                          *\n" +
-"*   Listening to client connections on: {%s:<15}                      *\n" +
+"*   Listening to client connections on: %s                      *\n" +
 "*                                                                          *\n" +
 "****************************************************************************\n"
 
-func StartEventsPlugins(exchange) {
-	
+type Plugin struct {
+	EventTypes string
+}
+
+func (p *Plugin) Run() {
+
+}
+
+type Process struct {
+	Name string
+	Target func()
+	Args func()
+}
+
+func (p *Process) Start() {
+
+}
+func StartEventsPlugins(exchange Exchange) {
+	var plugins map[string]Plugin
+	plugins = LoadEventsPlugins(Config.EventsPlugins)
+
+	for name, plugin := range plugins {
+		log.Println("Loading events plugin %s", name)
+		var eventType
+
+		var queue
+		queue = exchange.GetSubscriberQueue(eventTypes)
+
+
+	}
 }
 
 func Start() {
 	log.Println("Initializing BigchainDB...")
 
-	exchange := events.Exchange()
+	var exchange Exchange
 	log.Println("Strating block")
 	block.Start()
 

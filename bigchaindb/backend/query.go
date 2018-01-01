@@ -1,5 +1,8 @@
 package backend
 
+import (
+	"github.com/hidaruma/bigchaindb-go/bigchaindb"
+)
 
 type Queryer interface {
 	WriteTransaction(*Connection, *Transaction) error
@@ -11,11 +14,11 @@ type Queryer interface {
 	GetBlocksStatusFromTransaction(*Connection, string) error
 	GetAssetByID(*Connection, string) error
 	GetSpent(*Connection, string, string) error
-	GetSpendingTransactions(*Connection, []Input) error
+	GetSpendingTransactions(*Connection, []*Input) error
 	GetOwnedIDs(*Connection, string) error
 	GetVotesByBlockIDAndVoter(*Connection, string, string) error
 	GetVotesForBlockByVoter(*Connection, string, string) error
-	WriteBlock(*Connection, *BLock) error
+	WriteBlock(*Connection, *bigchaindb.Block) error
 	GetBlock(*Connection, string) error
 }
 

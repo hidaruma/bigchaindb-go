@@ -13,7 +13,7 @@ type CryptoKeypair struct {
 
 
 func HashData(data string) [32]byte {
-	return sha3.Sum256(data)
+	return sha3.Sum256([]byte(data))
 }
 
 func GenerateKeyPair() CryptoKeypair {
@@ -22,7 +22,7 @@ func GenerateKeyPair() CryptoKeypair {
 		log.Println(err)
 	}
 	
-	return CryptoKeypair{privateKey: pri, publicKey: pub}
+	return CryptoKeypair{PrivateKey: pri, PublicKey: pub}
 }
 
 type PublicKey ed25519.PublicKey
