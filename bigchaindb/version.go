@@ -1,6 +1,6 @@
-package version
+package bigchaindb
 
 const (
-	__version__ = "1.4.0.dev"
-	__short_version__ = "1.4.dev"
+	version string = "1.4.0.dev"
+	shortVersion string = "1.4.dev"
 )

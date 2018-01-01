@@ -1,4 +1,4 @@
-package events
+package bigchaindb
 
 const PoisonPill string = "POISON_PILL"
 

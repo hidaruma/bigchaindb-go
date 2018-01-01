@@ -1,25 +1,29 @@
 package backend
 
-func GetConfig(connection, , table) {
-	
+import (
+
+)
+
+type GetConfiger interface {
+	GetConfig(connection , interface{}, table)
 }
 
-func Reconfigure(connection, , table, shards, replicas, kwargs) {
-	
+type Reconfigurer interface {
+	Reconfigure(connection, interface{}, table, shareds, replicas, kwargs)
 }
 
-func SetShareds(connection, , shards) {
-	
+type SetSharedser interface {
+	SetShareds(connection, interface{}, shareds)
 }
 
-func SetReplicas(connection, , replicas) {
-	
+func SetReplicaser interface {
+	SetReplicas(connection, interface{}, replicas)
 }
 
-func AddReplicas(connection, repicas) {
-	
+func AddReplicaser interface {
+	AddReplica(connection, replicas)
 }
 
-func RemoveReplicas(connection, replicas) {
-	
+func RemoveReplicaser interface {
+	Removereplicas(connection, replicas)
 }

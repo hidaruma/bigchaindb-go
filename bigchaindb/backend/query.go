@@ -1,67 +1,22 @@
 package backend
 
-func WriteTransaction(connection , signedTransaction ) error {
 
-
-	return 
-}
-
-func UpdateTransaction(connection, ) error {
-
-	return 
-}
-
-func DeleteTransaction(connection, transactionID ) error {
-	
-}
-
-
-func GetStateTransactions(connection, transactionID ) error {
-	
-}
-
-func GetTransactionFromBlock(connection, transactionID , blockID ) error {
-	
-}
-
-func GetTransactionFromBacklog(connection, transactionID ) error {
-	
-}
-
-func GetBlocksStatusFromTransaction(connection, transactionID ) error {
-	
-}
-
-func GetAssetByID(connection , assetID ) error {
-	
-}
-
-func GetSpent(connection, transactionID, conditionID) error {
-	
-}
-
-func GetSpendingTransactions(connection, inputs ) error {
-	
-}
-
-func GetOwnedIDs(connection, owner) error {
-	
-}
-
-func GetVotesByBlockIDAndVoter(connection, blockID, nodePubkey) error {
-	
-}
-
-func GetVotesForBlocksByVoter(connection, BlockIDs, pubkey) error {
-	
-}
-
-func WriteBlock(connection, block) error {
-	
-}
-
-func GetBlock(connection, blockID) error {
-	
+type Queryer interface {
+	WriteTransaction(*Connection, *Transaction) error
+	UpdateTransaction(*Connection, string) error
+	DeleteTransaction(*Connection, string) error
+	GetStateTransactions(*Connection, string) error
+	GetTransactionFromBlock(*Connection, string, string) error
+	GetTransactionFromBacklog(*Connection, string) error
+	GetBlocksStatusFromTransaction(*Connection, string) error
+	GetAssetByID(*Connection, string) error
+	GetSpent(*Connection, string, string) error
+	GetSpendingTransactions(*Connection, []Input) error
+	GetOwnedIDs(*Connection, string) error
+	GetVotesByBlockIDAndVoter(*Connection, string, string) error
+	GetVotesForBlockByVoter(*Connection, string, string) error
+	WriteBlock(*Connection, *BLock) error
+	GetBlock(*Connection, string) error
 }
 
 func WriteAssets(connection, assets) error {

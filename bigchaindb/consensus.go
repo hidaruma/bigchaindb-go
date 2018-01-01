@@ -1,19 +1,13 @@
-package consensus
-
-import (
-	"github.com/hidaruma/bigchaindb-go/bigchaindb/voting"
-)
+package bigchaindb
 
 type BaseConsensusRules struct {
-	voting voting.Voting
+	Voting Voting
 }
 
-func (b *BaseConsensusRules) ValidateTransaction(bigchain, transaction) {
-	
-	return 
+func (b *BaseConsensusRules) ValidateTransaction(bigchain Bigchain, transaction Transaction) {
+	return transaction.Validate(bigchain)
 }
 
-func (b *BaseConsensusRules) ValidateBlock(bigchain, block) {
-
-	return 
+func (b *BaseConsensusRules) ValidateBlock(bigchain Bigchain, block Block) bool {
+	return block.Validate(bigchain)
 }

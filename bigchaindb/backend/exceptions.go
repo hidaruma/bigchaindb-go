@@ -1,30 +1,8 @@
 package backend
 
+type BackEndError error
 
-type BackEndError struct {
-	Msg string
-	Code int
-}
+type ConnectionError error
 
-func (err *BackEndError) Error() string {
-	return fmt.Sprintf("err %s [code=%d]", err.Msg, err.Code)
-}
-
-type ConnectionError struct {
-	Msg string
-	Code int
-}
-
-func (err *ConnectionError) Error() string {
-	
-}
-
-type OperationError struct {
-	Msg string
-	Code int
-}
-
-type DuplicateKeyError struct {
-	Msg string
-	Code int
-}
+type OperationError error
+type DuplicateKeyError error

@@ -1,4 +1,4 @@
-package core
+package bigchaindb
 
 import (
 	"math/random"

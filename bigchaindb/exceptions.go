@@ -1,17 +1,9 @@
-package exceptions
+package bigchaindb
 
-type BigchainDBError struct {
-	
-}
+type BigchainDBError error
 
-type CriticalDoubleSpend struct {
-	
-}
+type CriticalDoubleSpend error
 
-type CriticalDoubleInclusion struct {
-	
-}
+type CriticalDoubleInclusion error
 
-type CriticalDoplicateVote struct {
-	
-}
+type CriticalDoplicateVote error
