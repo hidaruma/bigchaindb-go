@@ -27,5 +27,8 @@ func GenerateKeyPair() CryptoKeypair {
 
 type PublicKey ed25519.PublicKey
 
+func (pk *PublicKey) Verify(body string, signature string) bool {
+	return ed25519.Verify(ed25519.PublicKey(*pk), []byte(body), []byte(signature))
+}
 
 type PrivateKey ed25519.PrivateKey

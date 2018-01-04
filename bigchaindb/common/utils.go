@@ -3,16 +3,16 @@ package common
 import (
 	"time"
 	"encoding/json"
-	"strings"
 	"regexp"
 	"github.com/hidaruma/bigchaindb-go/bigchaindb"
 	"log"
+	"strconv"
 )
 func GenTimestamp() string {
-	return time.Now().Unix()
+	return strconv.Itoa(int(time.Now().Unix()))
 }
 
-func Serialize(data [string]string) string {
+func Serialize(data map[string]interface{}) string {
 	b, err := json.Marshal(data)
 	if err != nil {
 		log.Println(err)
@@ -22,7 +22,7 @@ func Serialize(data [string]string) string {
 
 func Deserialize(data string) interface{} {
 	var ret interface{}
-	err := json.Unmarshal(data, ret)
+	err := json.Unmarshal([]byte(data), ret)
 	if err != nil {
 		log.Println(err)
 	}
@@ -69,7 +69,7 @@ func ValidateAllValuesForKey(obj map[string]interface{}, key string, validationF
 		} else {
 			switch value.(type) {
 			case map[string]interface{}:
-				ValidateAllValuesForKey(value, key, validationFun)
+				ValidateAllValuesForKey(map[string]interface{}(value), key, validationFun)
 			}
 		}
 	}
@@ -78,9 +78,34 @@ func ValidateAllValuesForKey(obj map[string]interface{}, key string, validationF
 func ValidateKey(objName string, key string) error {
 	if regexp.Find(`^[$|\.|\x00`, key) {
 		var errorStr string
-		errorStr = "Invalid key name " + key +" in "+  objName +" object. The ''key name cannot contain characters ''".", "$" or null characters"
-		return exceptions.ValidationError(errorStr)
+		errorStr = "Invalid key name " + key +" in "+  objName +" object. The ''key name cannot contain characters ''\".\", \"$\" or null characters"
+		return ValidationError(errorStr)
 	} else {
 		return nil
+	}
+}
+
+func Any(list []interface{}, validFunc func(interface{}) bool ) bool {
+	for _, a := range list {
+		if validFunc(a) {
+			return true
+		}
+	}
+	else {
+		return false
+	}
+}
+
+func All(list []interface{}, validFunc func(...interface{}) bool ) bool {
+	var validList []bool
+	for _, a := range list {
+		if validFunc(a) {
+			validList = append(validList, true)
+		}
+	}
+	if len(validList) == len(list) {
+		return true
+	} else {
+		return false
 	}
 }

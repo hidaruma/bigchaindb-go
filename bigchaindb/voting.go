@@ -17,9 +17,9 @@ type Voting struct {
 	
 }
 
-func (v *Voting) BlockElection(block Block, votes []Vote, keyring string) map[string]interface{} {
+func (v *Voting) BlockElection(block *Block, votes []*Vote, keyring string) *Vote {
 
-	var eligibleVoters []string
+	var eligibleVoters []*Vote
 	eligibleVoters = block.Voters
 	var nVoters int
 	nVoters = len(eligibleVoters)
@@ -28,19 +28,21 @@ func (v *Voting) BlockElection(block Block, votes []Vote, keyring string) map[st
 	eligibleVotes, ineligibleVotes = v.PartitionEligibleVotes(votes, eligibleVoters)
 	var byVoter map[string]Vote
 	byVoter = v.DedupeByVoter(eligibleVotes)
-	var results map[string]interface{}
-	results["block_id"] = block.ID
-	results["status"] = v.DecideVotes(nVoters, results["counts"])
-	results["ineligible"] = ineligibleVotes
+
+	var results *Vote
+	results = v.CountVotes(byVoter)
+	map[string]interface{}(*results)["block_id"] = block.ID
+	map[string]interface{}(*results)["status"] = v.DecideVotes(nVoters, results["counts"])
+	map[string]interface{}(*results)["ineligible"] = ineligibleVotes
 	return results	
 }
 
-func (v *Voting) PartitionEligibleVotes(votes []Vote, eligibleVoters []string) ([]Vote, []Vote) {
+func (v *Voting) PartitionEligibleVotes(votes []*Vote, eligibleVoters []string) ([]Vote, []Vote) {
 	var eligible []Vote
 	var ineligible []Vote
 
 	for _, vote := range votes {
-		if stringInSlice(vote.NodePubkey, eligibleVoters) {
+		if StringInSlice(Mapping(vote)["node"], []interface{}(eligibleVoters)) {
 			if v.VerifyVoteSignature(vote) {
 					eligible = append(eligible, vote)
 					continue
@@ -65,8 +67,8 @@ func (v *Voting) DedupeByVoter(eligibleVotes []Vote) map[string]Vote{
 	return byVoter
 }
 
-func (v *Voting) CountVotes(cls, byVoter map[string]Vote) {
-	var prevBlocks map[string]Vote
+func (v *Voting) CountVotes(byVoter map[string]*Vote) {
+	var prevBlocks map[string]int
 	var malformed []Vote
 
 	for _, vote := range byVoter {
@@ -92,14 +94,41 @@ func (v *Voting) CountVotes(cls, byVoter map[string]Vote) {
 	}
 }
 
-func (v *Voting) DecideVotes(cls, nVoters, nValid, nInvalid) {
-	
+func (v *Voting) DecideVotes(nVoters int, nValid int, nInvalid int) string {
+	if nInvalid *2 >= nVoters {
+		return INVALID
+	}
+	if nValid *2 >= nVoters{
+		return VALID
+	}
+	return UNDECIDED
 }
 
-func (v *Voting) VerifyVoteSignature(cls, vote) {
-	
+func (v *Voting) VerifyVoteSignature(vote *Vote) bool {
+	var signature string
+	var pkBase58 string
+	voteSignature := map[string]interface{}(*vote)["signature"]
+	voteNodePubkey := map[string]interface{}(*vote)["node_pubkey"]
+	if voteSignatureString, ok := voteSignature.(string); ok {
+		signature = voteSignatureString
+	} else {
+		log.Fatal(ValueError())
+	}
+	if voteNodePubkeyString, ok := voteNodePubkey.(string); ok {
+		pkBase58 = voteNodePubkeyString
+	}
+	var pubKey common.PublicKey
+	pubKey = common.PublicKey(pkBase58)
+	var body string
+	voteVote := map[string]interface{}(*vote)["vote"]
+	if voteVoteString, ok := voteVote.(map[string]string); ok {
+		body = common.Serialize(voteVoteString)
+	}
+
+	return pubKey.Verify(body, signature)
 }
 
-func (v *Voting) VerifyVoteSchema(cls, vote) bool {
-	
+func (v *Voting) VerifyVoteSchema(vote Vote) bool {
+	VaridateVoteSchema(vote)
+
 }

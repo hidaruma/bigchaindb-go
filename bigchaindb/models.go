@@ -3,6 +3,8 @@ package bigchaindb
 import (
 	"github.com/hidaruma/bigchaindb-go/bigchaindb/common"
 	"github.com/hidaruma/bigchaindb-go/bigchaindb/backend"
+	"log"
+	"cloud.google.com/go/trace"
 )
 
 
@@ -21,7 +23,7 @@ invalid.
 Raises:
 ValidationError: If the transaction is invalid
 */
-func (t *Transaction) Validate(bigchain Bigchain) {
+func (t *Transaction) Validate(bigchain Bigchain) *Transaction {
 	var inputConditions 
 	if t.Operation == Transaction.TRANSEFER() {
 		var inputTxs
@@ -79,11 +81,11 @@ func (t *Transaction) Validate(bigchain Bigchain) {
 	}
 }
 
-func (t *Transaction) FromDict(cls, txBody) {
+func (t *Transaction) FromDict(txBody) {
 	
 }
 
-func (t *Transaction) FromDB(cls, bigchain, txDict) {
+func (t *Transaction) FromDB(bigchain *Bigchain, txDict) {
 	
 }
 
@@ -102,15 +104,30 @@ integrity and validity of the creator of a Block.
 */
 type Block struct {
 	ID int
-	Transactions []Transaction
+	Transactions []*Transaction
 	NodePubkey string
 	Timestamp string
-	Voters []string
+	Voters []
 	Signature string	
 }
 
-func (b *Block) Eq(other) {
-	
+func (b *Block) init(transactions []*Transaction, nodePubkey string, timestamp string, voters []string, signature string) {
+
+	b.Transactions = transactions
+	b.Voters = voters
+	if timestamp != nil {
+		b.Timestamp = timestamp
+	} else {
+		b.Timestamp = common.GenTimestamp()
+	}
+	b.NodePubkey = nodePubkey
+	b.Signature = signature
+}
+
+func (b *Block) eq(other *Block) bool {
+	var otherDict map[string]interface{}
+	otherDict = other.ToDict()
+	return b.ToDict() == otherDict
 }
 
 /*
@@ -133,7 +150,7 @@ not validate
 */
 
 func (b *Block) Validate(bigchain Bigchain) *Block {
-	b.ValidateBlock(bigchain)
+	b.validateBlock(bigchain)
 	b.ValidateBlockTransactions(bigchain)
 	return b
 }
@@ -147,12 +164,12 @@ object.
 Raises:
 ValidationError: If there is a problem with the block
 */
-func (b *Block) ValidateBlock(bigchain Bigchain) {
-	if b.NodePublkey {
-		
+func (b *Block) validateBlock(bigchain Bigchain) {
+	if !StringInSlice(b.NodePubkey, b.Federation()) {
+		log.Fatal(SybilError())
 	}
 	if !b.IsSignatureValid() {
-		
+		log.Fatal(InvalidSignature("Invalid block signatature"))
 	}
 
 	var txIDs []string
@@ -171,7 +188,7 @@ bigchain (Bigchain): an instantiated bigchaindb.Bigchain object.
 Raises:
 ValidationError: If an invalid transaction is found
 */
-func (b *Block) ValidateBlockTransactions(bigchain Bigchain) {
+func (b *Block) validateBlockTransactions(bigchain Bigchain) {
 	for _, tx := range b.Transactions {
 		bigchain.ValidateTransaction(tx)
 	}
@@ -185,14 +202,19 @@ private_key (str): A private key corresponding to
 Returns:
 :class:`~.Block`
 */
-func (b *Block) Sign(privateKey string) *Block {
-	var blockBody 
+func (b *Block) Sign(privateKeyString string) *Block {
+	var blockBody map[string]interface{}
 	blockBody = b.ToDict()
-	var blockSerialized
-	blockSerialized = Serialize(blockBody["block"])
-	var privateKey string
-	privateKey = PrivateKey(privateKey)
-	b.Signature = privateKey.Sign(blockSerialized.Encode()).decode()
+	var blockSerialized string
+	blockSerialized = common.Serialize(blockBody["block"])
+	var privateKey common.PrivateKey
+	privateKey = common.PrivateKey([]byte(privateKeyString))
+	var signatureBytes []byte
+	signatureBytes, err := privateKey.Sign(blockSerialized)
+	if err != nil {
+		log.Fatal()
+	}
+	b.Signature = string(signatureBytes)
 	return b
 }
 
@@ -202,14 +224,74 @@ Returns:
 bool: Stating the validity of the Block's signature.
 */
 func (b *Block) IsSignatureValid() bool {
-	var block
+	var block map[string]interface{}
 	block = b.ToDict()["block"]
 
-	var blockSerialized
-	blockSerialized = serialize(block).Encode()
-	var publicKey string
-	publicKey = PublicKey(block["node_pubkey"])
-
-	
+	var blockSerialized string
+	blockSerialized = common.Serialize(block)
+	var publicKey common.PublicKey
+	if blockNodePubkey, ok := block["node_pubkey"].(string); ok {
+		publicKey = common.PublicKey([]byte(blockNodePubkey))
+	}
+	return publicKey.Verify(blockSerialized, b.Signature)
 }
 
+func (b *Block) FromDict(blockBody map[string]interface{}, txConstruct Transaction.FromDict) *Block {
+
+	var block map[string]interface{}
+	if blockBlock, ok := blockBody["block"].(map[string]interface{}); ok {
+		block = blockBlock
+	}
+	var transactions []*Transaction
+	if blockTransactions, ok := blockBody["transactions"].([]*Transaction); ok {
+		for _, tx := range blockTransactions {
+			transactions = append(transactions, txConstruct(tx))
+		}
+	}
+	var signature string
+	if blockBodySignature, ok := blockBody["signature"].(string); ok {
+		signature = blockBodySignature
+	}
+	b.Transactions = transactions
+	if blockNodePubkey, ok := block["node_pubkey"].(string); ok {
+		b.NodePubkey = blockNodePubkey
+	} else {
+		log.Fatal()
+	}
+	if blockTimestamp, ok := block["timestamp"].(string); ok {
+		b.Timestamp = blockTimestamp
+	}
+	if blockVoters, ok := block["voters"].([]string); ok {
+		b.Voters = blockVoters
+	}
+	b.Signature = signature
+	return b
+}
+
+func (b *Block) FromDB(bigchain *Bigchain, blockDict map[string]interface{}, fromDictKwargs map[string]string) *Block {
+	var assetIDs []string
+	assetIDs = b.GetAssetIDs(blockDict)
+	var assets []*common.Asset
+	assets = bigchain.GetAssets(assetIDs)
+
+	var txnIDs []string
+	txnIDs = b.GetTxnIDs(blockDict)
+	var metadata *common.Metadata
+	metadata = bigchain.GetMetadata(txnIDs)
+
+}
+
+func DecoupleAssets(blockDict map[string]string) {
+
+}
+
+
+type FastTransaction struct {
+
+}
+
+func (ft *FastTransaction) init() {
+	ID int
+	Data map[string]interface{}
+	
+}

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"encoding/base64"
 	"strconv"
+	"log"
 )
 
 const (
@@ -19,9 +20,10 @@ const (
 type Condition struct {
 	TypeID int
 	TypeName string
-	hash string
-	cost int
-	subtypes string
+	Fingerprint string
+	Hash string
+	Cost int
+	Subtypes string
 }
 
 type ConditionType map[string]interface{}
@@ -59,31 +61,30 @@ func (c *Condition) lt (other *Condition) bool {
 	return c.SerializeBinary() < other.SerializeBinary()
 }
 
-func (c *Condition) FromURI(serializedCondititon string) *Condition {
-	switch serializedCondititon.(type) {
-	//	case *Condition:
-	//		return serializedCondititon
+func (c *Condition) FromURI(serializedCondition interface{}) *Condition {
+	var serializedConditionString string
+	switch serializedCondition.(type) {
+	case *Condition:
+		return serializedCondition.(*Condition)
 	case string:
+		serializedConditionString = serializedCondition.(string)
 	default:
 		log.Println(TypeError())
 	}
 	var pieces []string
-	pieces = strings.Split(serializedCondititon, ":")
+	pieces = strings.Split(serializedConditionString, ":")
 	if pieces[0] != CONDITIONURISCHEME {
 		log.Println(PrefixError("Serialized condition must start with" + CONDITIONURISCHEME + "."))
 	}
 	var regexMatch bool
-	regexMatch, err := regexp.MatchString(CONDITIONREGEXSTRICT, serializedCondititon)
-	if err != nil {
-		log.Println(err)
-	}
+	re := regexp.MustCompile(CONDITIONREGEXSTRICT)
+	regexMatch = re.MatchString(serializedConditionString)
 	if !regexMatch {
 		log.Println(ParsingError)
 	}
-	re := regexp.MustCompile(CONDITIONREGEXSTRICT)
 	var regexMatchGroup [][]string
-	regexMatchGroup = re.FindAllStringSubmatch(serializedCondititon, -1)
-	u, err := url.Parse(regexMatchGroup[1][2])
+	regexMatchGroup = re.FindAllStringSubmatch(serializedConditionString, -1)
+	u, err := url.Parse(regexMatchGroup[0][2])
 	if err != nil {
 		log.Println(err)
 	}
@@ -94,7 +95,8 @@ func (c *Condition) FromURI(serializedCondititon string) *Condition {
 	conditionType = TypeRegistry.FindByName(fingerprintType)
 	var cost string
 	cost = qsDict["cost"][0]
-	if !regexp.MatchString(INTEGERREGEX, cost) {
+	var reInt = regexp.MustCompile(INTEGERREGEX)
+	if reInt.MatchString(cost) {
 		log.Println(ParsingError())
 	}
 	var fingerprint string
@@ -104,11 +106,16 @@ func (c *Condition) FromURI(serializedCondititon string) *Condition {
 	if conditionType["class"].TYPECATEGORY == "compound" {
 		condition.subtypes.Update(strings.Split(qsDict["subtypes"][0], ","))
 	}
-	condition.hash, err := base64.URLEncoding.DecodeString(fingerprint)
+	var conditionHash []byte
+	conditionHash, err = base64.URLEncoding.DecodeString(fingerprint)
 	if err != nil {
 		log.Println(err)
 	}
-	condition.cost = strconv.Atoi(cost)
+	condition.Hash = string(conditionHash)
+	condition.Cost, err = strconv.Atoi(cost)
+	if err != nil {
+		log.Println(err)
+	}
 	return condition
 }
 
@@ -121,115 +128,6 @@ func (c *Condition) FromBinary(data []byte) {
 	return Condition.FromAsn1Dict(asn1ConditionDict)
 }
 
-type Fulfillment struct {
-
-}
-
-func (f *Fulfillment) TYPEID() int {
-	return
-}
-
-func (f *Fulfillment) TYPENAME() string {
-	return ""
-}
-
-func (f *Fulfillment) FromURI(selializedFullfilment string) {
-	if serializedFulfillment.(type) != string {
-		log.Println(exceptions.TypeError())
-	}
-	return
-}
-
-func (f *Fulfillment) FromBinary(data []byte) {
-
-}
-
-func (f *Fulfillment) FromAsn1Dict(asn1Dict ) {
-
-}
-
-func (f *Fulfillment) FromDict(data []byte) {
-
-}
-
-func (f *Fulfillment) FromJson(data []byte) {
-
-}
-
-func (f *Fulfillment) TypeID() int {
-	return f.TYPEID
-}
-
-func (f *Fulfillment) TypeName() string {
-	return f.TYPENAME()
-}
-
-func (f *Fulfillment) Subtypes() []interface{} {
-	return []interface{}
-}
-
-func (f *Fulfillment) Condition() *Condition {
-	var condition *Condition
-	condition.TypeID = f.TypeID
-	condition.hash = f.GenerateHash()
-	condition.cost = f.CalculateCost()
-	condition.subtypes = f.Subtypes()
-	return condition
-}
-
-func (f *Fulfillment) ConditionURI() string {
-	return f.Condition.SerializeURI()
-}
-
-func (f *Fulfillment) ConditionBinary() []byte{
-	return f.Condition.SerializeBinary()
-}
-
-func (f *Fulfillment) GenerateHash() []byte {
-
-}
-
-func (f *Fulfillment) CalculateCost() int {
-
-}
-
-func (f *Fulfillment) SerializeURI() string {
-	var url string
-	url, err := base64.RawURLEncoding.DecodeString(f.serializeBinary())
-	if err != nil {
-		log.Println(err)
-	}
-	return url
-}
-
-func (f *Fulfillment) SerializeBinary() []byte {
-	var asn1Dict = map[string]string
-	asn1Dict = {f.TYPEASN1: f.Asn1DictPayload}
-	var asn1
-	asn1 = natDecode(asn1Dict, Asn1Fulfillment())
-	var binObj []byte
-	binObj, err := derEnecode(asn1)
-	if err != nil {
-		log.Println(err)
-	}
-	return binObj
-}
-
-func (f *Fulfillment) ToDict() {
-
-}
-
-func (f *Fulfillment) Asn1Dict(data [string]string) Fulfillment {
-
-}
-
-func (f *Fulfillment) ParseAsn1DictPayload(data [string]string) {
-
-}
-
-func (f *Fulfillment) Validate(args []int, kwargs []string) bool {
-
-}
 
 type ConditionTypes struct {
 	*asn1.BitString
@@ -255,10 +153,6 @@ type NamedTypes struct {
 	NamedType []NamedType
 }
 
-type Condition struct {
-	Fingerprint string
-	Cost int
-}
 
 type CompoundSha256Condition struct {
 	*Condition

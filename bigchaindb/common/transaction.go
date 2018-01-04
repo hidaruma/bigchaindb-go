@@ -1,7 +1,6 @@
 package common
 
 import (
-	"golang.org/x/crypto/ed25519"
 	"log"
 	"strings"
 	"os/exec"
@@ -13,30 +12,34 @@ import (
 	"net/url"
 	"strconv"
 	"github.com/hidaruma/bigchaindb-go/cryptoconditions"
+	"github.com/hidaruma/bigchaindb-go/bigchaindb/common"
+	base58 "github.com/itchyny/base58-go"
 )
 
 
-type Fulfills struct {
+type Recipient map[string]string
+
+type Fulfill struct {
 	*TransactionLink
 }
 
 type Input struct {
-	Fulfillment Fulfillment
+	Fulfillment *cryptoconditions.Fulfillment
 	OwnersBefore []string
-	Fulfills Fulfills
+	Fulfills []*Fulfill
 }
 
 
-func (i *Input) Eq(other *Input) bool {
-	if i.ToDict() == other.ToDict() {
+func (i *Input) eq(other *Input) bool {
+	if i == other {
 		return true
 	} else {
 		return false
 	}
 }
-
-func (i *Input) ToDict() error {
-	var fulfillment
+/*
+func (i *Input) ToDict() map[string]interface{} {
+	var fulfillment *cryptoconditions.Fulfillment
 	fulfillment, err := i.Fulfillment.SerializeUrl()
 	if err != nil {
 		switch err.(type) {
@@ -55,16 +58,16 @@ func (i *Input) ToDict() error {
 
 	return input
 }
-
+*/
 func (i *Input) Generate(publicKeys []string) *Input {
 
 	var output *Output
 	output = Output.Generate(publicKeys, 1)
 	i.Fulfillment = output.Fulfillment
 	i.OwnersBefore = publicKeys
-	i.Fulfills = {}
 	return i
 }
+/*
 
 func (i *Input) FromDict(data [string]string) *Input {
 	var fulfillment
@@ -89,37 +92,43 @@ func (i *Input) FromDict(data [string]string) *Input {
 	i.Fulfillment = fulfillment
 	return i
 }
-
-func FulfillmentToDatails(fulfillment ) ([string]interface{}, error) {
-	switch fulfillment.typeName {
-		case :
-			return {"type": "ed25519-sha-256",
-				"public_key": base58.b58encode(fulfillment.PublicKey)
-				}, nil
-		case "threshold-sha-256":
-			var subconditions = map([string]string)
-			for _, cond := range fulfillment.subconditions {
-				subconditions = append(subconditions, FulfillmentToDetails(cond["body"]))
+*/
+func fulfillmentToDatails(fulfillment *cryptoconditions.Fulfillment) map[string]interface{} {
+	var details map[string]interface{}
+	switch fulfillment.TypeName() {
+		case "ed25519-sha-256":
+			details["type"] = "ed25519-sha-256"
+			pubKey, err  := base58.BitcoinEncoding.Encode(fulfillment.PublicKey)
+			if err != nil {
+				log.Println()
 			}
-			return {
-				"type":"threshold-sha-256",
-				"threshold": fulfillment.threshold,
-				"subconditions": subconditions,
-			}, nil
+			details["publick_key"] = string(pubKey)
+			return details
+		case "threshold-sha-256":
+			var subconditions map[string]string
+			for _, cond := range fulfillment.Subconditions {
+				subconditions = append(subconditions, fulfillmentToDetails(cond["body"]))
+			}
+			details["type"] = "threshold-sha-256"
+			details["thresold"] = fulfillment.Threshold
+			details["subconditions"] = subconditions
+			return details
 		default:
-			return nil, exceptions.UnsupportedTypeError()
+			return nil
 	}
 }
 
-func FulfillmentFromDetails(data tx.Output[].Condition.Details, depth int) (, error){
+func fulfillmentFromDetails(data map[string]interface{}, depth int) *Fulfillment {
 	if depth == 100 {
-		return nil, exceptions.ThresholdTooDeep()
+		log.Fatal(ThresholdTooDeep)
 	}
 
-	switch data["type"] {
+	switch data["type"].(string) {
 		case "ed25519-sha-256":
-			var publicKey string
-			publicKey = base58.b58decode(data["public_key"])
+			var publicKey []byte
+			var decodePubKeyString []byte
+			decodePubKeyString = []byte(data["public_key"].(string))
+			publicKey, err := base58.BitcoinEncoding.Decode(decodePubKeyString)
 			return ed25519sha256(publicKey), nil
 		case "threshold-sha-256":
 			var threshold 
@@ -199,8 +208,8 @@ func (o *Output) FromDict(data [string]string) {
 	
 }
 
-type Asset [string]string
-type Metadata [string]string
+type Asset map[string]string
+type Metadata map[string]string
 type Transaction struct {
 	Operation string
 	Inputs []Input
@@ -248,17 +257,28 @@ func (t *Transaction) Create(txSigners []string, recipients , metadata Metadata,
 	return t
 }
 
-func (t *Transaction) Transfer(inputs []Input, recipients ,assetID string, metadata Metadata) *Transaction{
-
+func (t *Transaction) Transfer(inputs []Input, recipients []Recipient, assetID string, metadata Metadata) *Transaction{
+	if len(inputs) == 0 {
+		log.Println(ValueError())
+	}
+	if len(recipients) == 0 {
+		log.Println(ValueError())
+	}
+	var outputs []Output
+	for _, recipient := range recipients {
+		for pubKeys, amount := recipient {
+			outputs = append(outputs, Output.Generate(pubKeys, amount))
+		}
+	}
 	t.Operation = t.TRANSFER()
-	t.Asset = append(t.Asset, {"id": assetID})
+	t.Asset["id"] = assetID
 	t.Inputs = inputs
 	t.Outputs = outputs
 	t.Metadata = metadata
 	return t
 }
 
-func (t *transaction) Eq(other ) bool {
+func (t *transaction) eq(other *Transaction) bool {
 	
 }
 
@@ -313,35 +333,70 @@ func (t *Transaction) signInput(input Input, message string, keyPairs [string]st
 	}
 }
 
-func (t *Transaction) signSimpleSignatureFulfillment(input Input, message string, keyPairs [string]string) Input {
+func (t *Transaction) signSimpleSignatureFulfillment(input Input, message string, keyPairs map[string]string) Input {
 	var input_ Input
 	input_ = input
 	var publicKey string
 	publicKey = input_.OwnersBefore[0]
-	err := input_.Fulfillment.Sign(message.Encode(), base58.b58decode(keyPairs[publicKey].Encode()))
+	err := input_.Fulfillment.Sign(message, base58.b58decode(string(keyPairs[publicKey]))
 	if err != nil {
-		log.Println(exceptions.KeypairMismatchException())
+		log.Println(KeypairMismatchException())
 	}
 	return input_
 }
 
-func (t *Transaction) signThresholdSignatureFulfillment(input Input, message string, keyPairs [string]string) Input {
+func (t *Transaction) signThresholdSignatureFulfillment(input Input, message string, keyPairs map[string]string) Input {
 
+	for _, ownerBefore := range input.OwnersBefore {
+		var ccffill *cryptoconditions.Fulfillment
+		ccffill = input.Fulfillment
+		var subfills *[]Fulfill
+		subfills = ccffill.GetSubconditionFromVk(base58.b58Encode(ownerBefore))
+		if subfills == nil {
+			log.Println(KeypairMicmatchException())
+		}
+		var privateKey string
+		privateKey = keyPairs[ownerBefore]
+		if privateKey.(type) != string {
+			log.Println(KeypairMismatchException())
+		}
+
+	}
 }
 
-func (t *Transaction) inputsValid(outputConditionURLs []string) {
-	if len(t.Inputs) != len(outputConditionURLs) {
-		log.Println(exceptions.ValueError())
+func (t *Transaction) InputsValid(outputs []Output) {
+	if t.Operation == Transaction.CREATE() || t.Operation == Transaction.GENESIS() {
+		outputs []Output
 	}
 
-	return
+		return t.inputsValid()
+	}
 }
 
-func (t *Transaction) validate(i int, outputConditionURL string, txSerialized string, outputConditionURLs []string) {
-	return t.inputValid(t.Inputs[i], t.Operation, txSerialized, outputConditionURLs)
+
+
+func (t *Transaction) inputsValid(outputConditionURLs []string) bool {
+	if len(t.Inputs) != len(outputConditionURLs) {
+		log.Println(ValueError())
+	}
+	var txDict map[string]interface{}
+	txDict = t.ToDict()
+	txDict = Transaction.RemoveSignatures(txDict)
+	txDict["id"] = nil
+	var txSerialized string
+	txSerialized = Transaction.toStr(txDict)
+	var icond map[i]struct{ string;  }
+	for i, cond := range outputConditionURLs {
+		icond[i] = cond
+	}
+	return common.All(icond, t.validate)
 }
 
-func (t *Transaction) inputValid(in/home/hidarumaput Input, operation string, txSerialized string, outputConditionURL string) bool {
+func (t *Transaction) validate(i int, outputConditionURL string, txSerialized string) bool {
+	return t.inputValid(t.Inputs[i], t.Operation, txSerialized, outputConditionURL)
+}
+
+func (t *Transaction) inputValid(input Input, operation string, txSerialized string, outputConditionURL string) bool {
 	var ccffill Fulfillment
 	ccffill = input.Fulfillment
 	var parsedFfill
@@ -372,7 +427,7 @@ func (t *Transaction) ToDict() [string]interface{}{
 
 }
 
-func (t *Transaction) removeSignatures(txDict [string]string) [string]string {
+func (t *Transaction) removeSignatures(txDict map[string]string) map[string]string {
 
 }
 
@@ -393,16 +448,14 @@ func (t *Transaction) toStr(value string) string {
 }
 
 func (t *Transaction) str() string {
-	var tx
-	tx = transaction.removeSignatures(t.ToDict())
+	var tx *Transaction
+	tx = Transaction.removeSignatures(t.ToDict())
 	return Transaction.toStr(tx)
 }
 
-func (t *Transaction) GetAssetID(transactions []Transaction) string {
-	if transactions.(type) != []Transaction {
-		transactions = [transactions]
-	}
-	var assetIDs = make([]string)
+func (t *Transaction) GetAssetID(transactions []*Transaction) string {
+
+	var assetIDs []string
 	for _, tx := range transactions {
 		if tx.Operation == Transaction.CREATE() {
 			assetIDs = append(assetIDs, tx.ID)
@@ -411,20 +464,23 @@ func (t *Transaction) GetAssetID(transactions []Transaction) string {
 		}
 	}
 	if len(assetIDs) > 1 {
-		log.Println(exceptions.AssetIdMismatch())
+		log.Println(AssetIDMismatch())
 	}
-	return assetIDs.Pop()
+	return assetIDs[0]
 }
 
 func (t *Transaction) ValidateID(txBody) {
 
 }
 
-func (t *Transaction) FromDict(tx *Transaction) *Transaction{
-	var inputs []Input
-	var outputs []Output
+func (t *Transaction) FromDict(tx map[string]interface{}) *Transaction{
+	var inputs []*Input
+	var outputs []*Output
+	switch tx["inputs"].(type) {
+	case []*Input :
 	for _, input := range tx["inputs"] {
 		inputs = append(inputs, Input.FromDict(input))
+	}
 	}
 	for _, output := range tx["outputs"] {
 		outputs = append(outputs, Output.FromDict(output))

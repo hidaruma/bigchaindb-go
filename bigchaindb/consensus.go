@@ -1,10 +1,10 @@
 package bigchaindb
 
 type BaseConsensusRules struct {
-	Voting Voting
+	Voting *Voting
 }
 
-func (b *BaseConsensusRules) ValidateTransaction(bigchain Bigchain, transaction Transaction) {
+func (b *BaseConsensusRules) ValidateTransaction(bigchain Bigchain, transaction Transaction) *Transaction {
 	return transaction.Validate(bigchain)
 }
 

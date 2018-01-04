@@ -6,8 +6,6 @@ import (
 	"time"
 	"log"
 	"encoding/json"
-	"go/constant"
-	"github.com/onsi/ginkgo/integration/_fixtures/watch_fixtures/B"
 )
 
 const (
@@ -18,7 +16,13 @@ const (
 )
 type Element map[string]interface{}
 
-type Config map[string][string]interface{}
+type Config struct {
+	Keypair common.CryptoKeypair
+	Keyring []string
+	BacklogReassignDelay int
+	ConsensusPlugin BaseConsensusRules
+	Database string
+}
 
 type Keyring []string
 
@@ -26,8 +30,8 @@ type Bigchain struct {
 	Me string
 	MePrivate string
 	NodesExceptMe Keyring
-	BacklogReassignDelay string
-	Consensus BaseConsensusRules
+	BacklogReassignDelay int
+	Consensus *BaseConsensusRules
 	Connection *backend.Connection
 	Statusd string
 }
@@ -65,31 +69,31 @@ keyring (list[str]): list of base58 encoded public keys of the federation nodes.
 connection (:class:`~bigchaindb.backend.connection.Connection`):
 A connection to the database.
 */
-func (bc *Bigchain) init(publicKey string, privateKey string, keyring []string, connection *backend.Connection, backlogReassignDelay string) {
+func (bc *Bigchain) init(publicKey string, privateKey string, keyring []string, connection *backend.Connection, backlogReassignDelay int) {
 	var config *Config
-	config = Autoconfigure()
-	if publicKey != nil {
+	config = Autoconfigure(nil, nil, nil)
+	if publicKey != "" {
 		bc.Me = publicKey
 	} else {
-		bc.Me = config["keypair"]["public"]
+		bc.Me = string(config.Keypair.PublicKey)
 	}
-	if privateKey != nil {
+	if privateKey != "" {
 		bc.MePrivate = privateKey
 	} else {
-		bc.MePrivate = config["keypair"]["private"]
+		bc.MePrivate = string(config.Keypair.PrivateKey)
 	}
 	if keyring != nil {
 		bc.NodesExceptMe = keyring
 	} else {
-		bc.NodesExceptMe = config["keyring"]
+		bc.NodesExceptMe = config.Keyring
 	}
-	if backlogReassignDelay == nil {
-		backlogReassignDelay = config["backlog_reassign_delay"]
+	if backlogReassignDelay == 0 {
+		backlogReassignDelay = config.BacklogReassignDelay
 	}
 	bc.BacklogReassignDelay = backlogReassignDelay
 
 	var consensusPlugin Plugin
-	consensusPlugin = config["consensus_plugin"]
+	consensusPlugin = config.ConsensusPlugin
 
 	if consensusPlugin != nil {
 		bc.Consensus = LoadConsensusPlugins(consensusPlugin)
@@ -100,7 +104,7 @@ func (bc *Bigchain) init(publicKey string, privateKey string, keyring []string, 
 	if connection != nil {
 		bc.Connection = connection
 	} else {
-		bc.Connection = backend.Connect(config["database"])
+		bc.Connection = backend.Connect(config.Database)
 	}
 }
 func (bc *Bigchain) Federation() []string {
@@ -650,7 +654,7 @@ func (bc *Bigchain) GetLastVotedBlock() {
 }
 
 
-func (bc *Bigchain) BlockElection(block *Block) {
+func (bc *Bigchain) BlockElection(block *Block) *Vote {
 	switch block.(type) {
 	case map[string]interface{}:
 	default:
@@ -723,7 +727,7 @@ limit (int, optional): Limit the number of returned documents.
 Returns:
 iter: An iterator of assets that match the text search.
 */
-func (bc *Bigchain) TextSearch(search , , limit int, table string) []interface{} {
+func (bc *Bigchain) TextSearch(search ,asterisk interface{} , limit int, table string) []interface{} {
 	var objects []interface{}
 	objects = backend.Query.TextSearch(bc.Connection, search, limit, table)
 	var validObjects []interface{}
